@@ -14,11 +14,6 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-PF: list[float] = []  # e.g. [1200, 1100, 980, ...]
-PA: list[float] = []  # e.g. [1000, 1150, 1050, ...]
-WinRecord: list[float] = []  # e.g. [10, 8, 6, ...] or win pct [0.625, 0.5, ...]
-# --------------------------------------------------------------------
-
 
 def _check_lengths(*arrays: Sequence) -> None:
     lengths = [len(a) for a in arrays]
@@ -50,7 +45,10 @@ def fit_linear_regression(
 
 
 def evaluate_models(
-    pf: Sequence[float], pa: Sequence[float], wins: Sequence[float]
+    pf: Sequence[float],
+    pa: Sequence[float],
+    wins: Sequence[float],
+    source_name: str = "data",
 ) -> None:
     _check_lengths(pf, pa, wins)
     pf_arr = np.asarray(pf, dtype=float)
@@ -79,7 +77,9 @@ def evaluate_models(
         coef_str = ", ".join(f"{c:.4f}" for c in np.atleast_1d(coefs))
         print(f"- {name}: R^2={r2:.4f}, intercept={intercept:.4f}, coefs=[{coef_str}]")
         try:
-            plot_model(name, X, wins_arr, ypred, coefs, intercept, r2, outdir)
+            plot_model(
+                name, X, wins_arr, ypred, coefs, intercept, r2, outdir, source_name
+            )
         except Exception as exc:
             print(f"Warning: failed to create plot for {name}: {exc}")
 
@@ -93,10 +93,12 @@ def plot_model(
     intercept: float,
     r2: float,
     outdir: Path,
+    source_name: str = "data",
 ) -> Path:
     """Create and save a plot for the given model. Returns the saved file path."""
     safe = name.replace(" ", "_").replace("(", "").replace(")", "").replace("+", "plus")
-    fname = outdir / f"model_{safe}.png"
+    src = str(source_name).replace(" ", "_").replace("/", "_").replace("\\", "_")
+    fname = outdir / f"model_{safe}_{src}.png"
 
     plt.close("all")
     if X.ndim == 1 or X.shape[1] == 1:
@@ -232,20 +234,49 @@ def main() -> None:
         description="Compare PF, PA, and uv (PF-PA) as predictors of WinRecord"
     )
     parser.add_argument(
-        "--csv", help="Path to CSV file with columns PF,PA,WinRecord (header optional)"
+        "--all",
+        help="Use all CSVs within a directory",
+    )
+    parser.add_argument(
+        "--csv",
+        help="Path to CSV file with columns PF,PA,WinRecord (header optional)",
     )
     args = parser.parse_args()
 
-    pf_data = PF
-    pa_data = PA
-    win_data = WinRecord
+    source_base = "data"
 
+    pf_data = []
+    pa_data = []
+    win_data = []
     if args.csv:
-        try:
-            pf_data, pa_data, win_data = load_from_csv(args.csv)
-        except Exception as exc:
-            print(f"Failed to load CSV '{args.csv}': {exc}")
-            return
+        pf_data, pa_data, win_data = load_from_csv(args.csv)
+        source_base = Path(args.csv).stem
+    elif args.all:
+        # combine all the CSVs in the directory
+        # then run the loading
+        dir_path = Path(args.all)
+        if not dir_path.is_dir():
+            parser.error(f"--all argument must be a directory, got: {args.all}")
+            sys.exit(1)
+        combined_pf = []
+        combined_pa = []
+        combined_win = []
+        for csv_file in dir_path.glob("*.csv"):
+            try:
+                pf, pa, win = load_from_csv(str(csv_file))
+                combined_pf.extend(pf)
+                combined_pa.extend(pa)
+                combined_win.extend(win)
+            except Exception as exc:
+                print(f"Warning: failed to load {csv_file}: {exc}")
+        pf_data = combined_pf
+        pa_data = combined_pa
+        win_data = combined_win
+        source_base = f"all_from_{dir_path.name}"
+    else:
+        # what the heck happened, error out
+        parser.error("Either --csv or --all must be specified")
+        sys.exit(1)
 
     if not (pf_data and pa_data and win_data):
         print(
@@ -254,7 +285,7 @@ def main() -> None:
         return
 
     try:
-        evaluate_models(pf_data, pa_data, win_data)
+        evaluate_models(pf_data, pa_data, win_data, source_base)
     except Exception as exc:
         print(f"Error evaluating models: {exc}")
 

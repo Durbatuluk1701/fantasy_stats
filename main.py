@@ -261,7 +261,7 @@ def main() -> None:
         combined_pf = []
         combined_pa = []
         combined_win = []
-        for csv_file in dir_path.glob("*.csv"):
+        for csv_file in dir_path.glob("**/*.csv"):
             try:
                 pf, pa, win = load_from_csv(str(csv_file))
                 combined_pf.extend(pf)
